@@ -12,10 +12,10 @@ from selenium.webdriver.common.action_chains import ActionChains
 import random
 from concurrent.futures import ThreadPoolExecutor
 import traceback
-from phone import Phone
-from chat import Chat
-from operation import Operation
-from sleep import sleep
+from phone import *
+from chat import *
+from operation import *
+from Utils import *
 
 # Time which the driver will wait to find component untill timeout exception is raised in seconds
 DRIVER_WAIT_TIME = 10
