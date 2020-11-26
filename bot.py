@@ -1,106 +1,26 @@
-from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.support.ui import WebDriverWait
+from concurrent.futures import ThreadPoolExecutor
+from selenium.webdriver.common.keys import Keys
+from usercacheobserver import UserCacheObserver
+from chatcacheobserver import ChatCacheObserver
 from selenium.webdriver.common.by import By
 from datetime import datetime, timedelta
-from selenium.common.exceptions import TimeoutException
-from selenium.common.exceptions import StaleElementReferenceException
-import timeit
-import re
-from selenium.webdriver.common.action_chains import ActionChains
-import random
-from concurrent.futures import ThreadPoolExecutor
+from localstorage import LocalStorage
+from operation import Operation
+from selenium import webdriver
+from botutils import *
+from chat import Chat
 import traceback
-from phone import *
-from chat import *
-from operation import *
-from Utils import *
-
-# Time which the driver will wait to find component untill timeout exception is raised in seconds
-DRIVER_WAIT_TIME = 10
-
-# 1 second in milliseconds
-SECOND = 1000
-
-# 1 hour in milliseconds
-HOUR = 3600 * SECOND
-
-# Sleep time between searching from 1 component to another in milliseconds
-SLEEP_TIME_BETWEEN_COMPONENTS = 10 * SECOND
-
-# Waiting for new message limit before switching to different operation
-RETRY_LIMIT = 2
-
-# Time to run the bot until it pauses for SLEEP_BOT_TIME seconds
-BOT_WAIT_TIME = 1200
-
-# Time which the bot will sleep every BOT_WAIT_TIME milliseconds in milliseconds
-BOT_SLEEP_TIME = SECOND * 60 * 10
-
-# Current running bot link
-BOT_LINK = "https://web.telegram.org/#/im?p=@Zcash_click_bot"
-
-# Open chat link pattern
-OPEN_CHAT_LINK_PART = "https://web.telegram.org/#/im?p=@"
-
-# Object used to unbuffer the print and show the output during execution of the program
-class Unbuffered(object):
-   def __init__(self, stream):
-       self.stream = stream
-   def write(self, data):
-       self.stream.write(data)
-       self.stream.flush()
-   def writelines(self, datas):
-       self.stream.writelines(datas)
-       self.stream.flush()
-   def __getattr__(self, attr):
-       return getattr(self.stream, attr)
+import timeit
+import random
+import sys
+import re
 
 class Bot:
-
-	def get_chat_file(self):
-		return "chat_" + self.phone.phoneNumber + ".cache"
-
-	def cache_joined_channels(self):
-		print("Caching joined channels")
-		f = open(self.get_chat_file(), "w+")
-		for chat in self.chatsJoined:
-			print("Cached chat: ", chat.get_info())
-			f.write(chat.get_info())
-		f.close()
-
-	def load_chat_from_cache(self, cache_line):
-		try:
-			print("Parsing line: ", cache_line)
-			cache_line_unwrapped = cache_line[1:-2]
-			print("Unwrapped line: ", cache_line_unwrapped)
-			cache_line_parts = cache_line_unwrapped.split(",")
-			link = cache_line_parts[0].split(":", 1)[1].strip()
-			joinedDate = datetime.strptime(cache_line_parts[1].split(":", 1)[1].strip(), "%Y-%m-%d %H:%M:%S.%f")
-			leaveDate = datetime.strptime(cache_line_parts[2].split(":", 1)[1].strip(), "%Y-%m-%d %H:%M:%S.%f")
-			chat = Chat(link, joinedDate, leaveDate)
-			print("Serialized chat: ", chat.get_info())
-			return chat
-		except:
-			print("Line ", cache_line, " does not contain valid chat information")
-		return None
-
-	def load_chats_from_last_run(self):
-		print("Loading cached chats..!")
-		chatsJoined = []
-		try:
-			f = open(self.get_chat_file(), "r")
-			for chat_line in f:
-				chat = self.load_chat_from_cache(chat_line)
-				if chat != None:
-					chatsJoined.append(chat)
-			f.close()
-			print(len(chatsJoined), " chats loaded from cache..!")
-		except:
-			print("Error while reading cache")
-		return chatsJoined
-
 	def reset(self):
 		self.waitingForTasksRetry = 0
 		# Variable to check whether the bot has changed the operation
@@ -116,15 +36,20 @@ class Bot:
 		# Variable to count how many sites the bo has visited
 		self.visitedSitesCount = 0
 
-	def __init__(self, driver, operation, currency, phone):
+	def __init__(self, driver, operation, currency):
 		print("Initializing bot..!")
-		self.phone = phone
-		self.CHATS_CACHE_FILE = "chats.cache" + "_" + self.phone.phoneNumber
 		self.driver = driver
 		self.operation = operation
 		self.currency = currency
-		self.chatsJoined = self.load_chats_from_last_run()
-		self.reset()
+		self.userObserver = UserCacheObserver()
+		self.chatCache = ChatCacheObserver()
+		self.storage = LocalStorage(self.driver)
+		self.currentUser = None
+		self.chatsJoined = None
+
+	def set_user(self, user):
+		print ("Bot::Switching to user: ", user)
+		self.currentUser = user
 
 	def close_tab(self):
 		self.driver.switch_to.window(self.driver.window_handles[1])
@@ -132,9 +57,10 @@ class Bot:
 		self.driver.switch_to.window(self.driver.window_handles[0])
 
 	def refresh(self, channel_link = BOT_LINK):
-		print("Refreshing link ", channel_link)
+		print("Bot::Refreshing link ", channel_link)
 		self.driver.get(channel_link)
 		self.driver.refresh()
+		sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 
 	def get_last_message(self):
 		try:
@@ -146,7 +72,7 @@ class Bot:
 			return None
 
 	def change_operation(self, new_operation):
-		print("Changing operation..!")
+		print("Bot::Changing operation..!")
 		self.operation = new_operation
 		self.isOperationInitialized = False
 		self.refresh()
@@ -160,9 +86,9 @@ class Bot:
 			)
 			ok_popup_btn.click()
 		except:
-			print("OK Button is not present")
+			print("Bot::OK Button is not present")
 			return False
-		print("Clicking OK button")
+		print("Bot::Clicking OK button")
 		return True
 
 	def click(self, component_type, names, classes = "btn reply_markup_button"):
@@ -170,18 +96,18 @@ class Bot:
 			buttons = WebDriverWait(self.driver, DRIVER_WAIT_TIME).until(
 				EC.presence_of_all_elements_located((By.XPATH, "//" + component_type + "[@class='" + classes + "']"))
 			)
-			print("Searching for ", names)
-			print("Total number of buttons found ", len(buttons))
+			print("Bot::Searching for ", names)
+			print("Bot::Total number of buttons found ", len(buttons))
 			for button in reversed(buttons):
 				text = button.text
-				print("Processing button ", button.text.encode("utf-8"))
+				print("Bot::Processing button ", button.text.encode("utf-8"))
 				for name in names:
 					if text.strip().find(name.strip()) != -1:
-						print("Clicking '",name.strip(),"' component")
+						print("Bot::Clicking '",name.strip(),"' component")
 						button.click()
 						return True
 		except TimeoutException:
-			print("Component ", names, " was not found on the page in the given timeout")
+			print("Bot::Component ", names, " was not found on the page in the given timeout")
 		return False
 
 	def send_text(self, text):
@@ -213,10 +139,10 @@ class Bot:
 		return self.click_link_by_name(["Go to channel", "Go to group"])
 
 	def validate_join_chats(self):
-		print("Validate joining chats")
+		print("Bot::Validate joining chats")
 		message = self.get_last_message().strip()
 		if message != None:
-			print("Validating message: ", message.encode("utf-8"));
+			print("Bot::Validating message: ", message.encode("utf-8"));
 			result = True
 			if message.find("We cannot find you") != -1 or message.find("You already completed this task") != -1:
 				self.skip_channel()
@@ -226,11 +152,11 @@ class Bot:
 				sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 				result = False
 			elif message.find("Sorry, there are no new ads available.") != -1 or message.find("Join chats") != -1:
-				print("Waiting for new tasks")
+				print("Bot::Waiting for new tasks")
 				sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 				result = False
 				self.waitingForTasksRetry += 1
-				print("RETRY: ", self.waitingForTasksRetry," from JOIN")
+				print("Bot::RETRY: ", self.waitingForTasksRetry," from JOIN")
 				if self.waitingForTasksRetry % RETRY_LIMIT == 0:
 					self.change_operation(Operation.VISIT)
 		else:
@@ -239,7 +165,7 @@ class Bot:
 			sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 			self.open_channel(BOT_LINK)
 		
-		print("Validation is: ", result)
+		print("Bot::Validation is: ", result)
 		
 		return result
 
@@ -254,7 +180,7 @@ class Bot:
 			EC.presence_of_all_elements_located((By.CLASS_NAME, 'im_message_text'))
 		)
 		for message in reversed(messages):
-			print("Processing message: ", message.text.encode("utf-8"))
+			print("Bot::Processing message: ", message.text.encode("utf-8"))
 			if message.text.find("You must stay in the channel for at least") != -1 or message.text.find("You must stay in the group for at least") != -1:
 				return int(re.search('at least (.+?) hour', message.text).group(1).strip())
 
@@ -266,7 +192,7 @@ class Bot:
 		else:
 			self.start_message_bots()
 		self.isOperationInitialized = True
-		print("Initializing operation")
+		print("Bot::Initializing operation")
 
 	def is_bot_joined_success(self):
 		sleep(SLEEP_TIME_BETWEEN_COMPONENTS / 2)
@@ -287,11 +213,11 @@ class Bot:
 						self.refresh()
 					else:
 						self.driver.switch_to.window(self.driver.window_handles[1])
-						print("Current url is ", self.driver.current_url)
+						print("Bot::Current url is ", self.driver.current_url)
 						chatUrlNameParts = self.driver.current_url.split("/")
-						print("URL parts are", chatUrlNameParts)
+						print("Bot::URL parts are", chatUrlNameParts)
 						chatUrlName = chatUrlNameParts[len(chatUrlNameParts) - 1].strip()
-						print("Extracted chat name", chatUrlName)
+						print("Bot::Extracted chat name", chatUrlName)
 						self.close_tab()
 						sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 						self.open_channel(OPEN_CHAT_LINK_PART + chatUrlName)
@@ -310,34 +236,34 @@ class Bot:
 					if self.is_bot_joined_success() and channel_url != None:
 						hoursUntillReward = self.get_hours_untill_reward()
 						if hoursUntillReward != None:
-							print("Hours untill reward '", hoursUntillReward, "'")
+							print("Bot::Hours untill reward '", hoursUntillReward, "'")
 							joinDate = datetime.now()
 							leaveDate = joinDate + timedelta(hours = hoursUntillReward)
 							chat = Chat(channel_url, joinDate, leaveDate)
 							self.chatsJoined.append(chat)
-							print("Joined channel: ", chat.get_info())
+							print("Bot::Joined channel: ", chat.get_info())
 							self.joinedChatsCount += 1
-							print("You have joined ", self.joinedChatsCount, " chats in total")
+							print("Bot::You have joined ", self.joinedChatsCount, " chats in total")
 							if self.joinedChatsCount % self.joinLimit == 0:
 								self.change_operation(Operation.VISIT)
 						else:
 							self.change_operation(Operation.VISIT)
 
 	def open_site(self):
-		print("Openning site")
+		print("Bot::Openning site")
 		return self.click_link_by_name(["Go to website"])
 
 	def validate_visit_sites(self):
-		print("Validate visiting sites")
+		print("Bot::Validate visiting sites")
 		message = self.get_last_message().strip()
-		print("Validating message: ", message.encode("utf-8"));
+		print("Bot::Validating message: ", message.encode("utf-8"));
 		result = True
 		if message.find("Sorry, there are no new ads available.") != -1:
-			print("Waiting for new tasks")
+			print("Bot::Waiting for new tasks")
 			sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 			result = False
 			self.waitingForTasksRetry += 1
-			print("RETRY: ", self.waitingForTasksRetry," from VISIT")
+			print("Bot::RETRY: ", self.waitingForTasksRetry," from VISIT")
 			if self.waitingForTasksRetry % RETRY_LIMIT == 0:
 				self.change_operation(Operation.JOIN)
 		
@@ -345,7 +271,7 @@ class Bot:
 			sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 			self.open_channel(BOT_LINK)
 		
-		print("Validation is: ", result)
+		print("Bot::Validation is: ", result)
 		
 		return result
 
@@ -355,15 +281,15 @@ class Bot:
 		)
 		sleepTime = 0
 		for message in reversed(messages):
-			print("Processing message: ", message.text.encode("utf-8"))
+			print("Bot::Processing message: ", message.text.encode("utf-8"))
 			if message.text.find("Please stay on the site for at least") != -1:
 				regex = re.search('Please stay on the site for at least (.+?) seconds', message.text)
-				print("Regex result is ", regex)
+				print("Bot::Regex result is ", regex)
 				sleepTime = int(regex.group(1)) * SECOND
 				break
 			elif message.text.find("You must stay on the site for") != -1:
 				regex = re.search('You must stay on the site for (.+?) seconds to get your reward', message.text)
-				print("Regex result is ", regex)
+				print("Bot::Regex result is ", regex)
 				sleepTime = int(regex.group(1)) * SECOND
 				break
 		return sleepTime
@@ -381,20 +307,20 @@ class Bot:
 					self.close_tab()
 					if siteSleepTimeUntillReward != 0:
 						self.visitedSitesCount += 1
-						print("You have visited ", self.visitedSitesCount, " sites in total")
+						print("Bot::You have visited ", self.visitedSitesCount, " sites in total")
 						if self.visitedSitesCount % self.visitLimit == 0:
 							self.change_operation(Operation.JOIN)
 					else:
 						self.skip_channel()
 
 	def message_bots(self):
-		print("Messaging bots")
+		print("Bot::Messaging bots")
 
 	def wait_for_login(self):
 		WebDriverWait(self.driver, 5 * 60).until(
 			EC.text_to_be_present_in_element((By.XPATH, "//div[@class='im_history_not_selected vertical-aligned']"), "Please select a chat to start messaging")
 		)
-		print("Login successfull")
+		print("Bot::Login successfull")
 
 	def login(self):
 		# Set phone country input field
@@ -434,13 +360,13 @@ class Bot:
 		all_peers_info[len(all_peers_info) - 1].click()
 
 	def leave_current_channel(self):
-		print("Leaving current channel..!")
+		print("Bot::Leaving current channel..!")
 		try:
 			if self.click("a", ["Leave"], 'md_modal_list_peer_action pull-right') == False:
 				self.click("a", ["Leave channel"], 'md_modal_section_link')
 				return True
 		except:
-			print("Channel already is left")
+			print("Bot::Channel already is left")
 		return False
 
 	def press_escape(self):
@@ -454,20 +380,20 @@ class Bot:
 			popup = WebDriverWait(self.driver, DRIVER_WAIT_TIME / 2).until(
 				EC.presence_of_all_elements_located((By.CLASS_NAME, 'error_modal_description'))
 			)
-			print("popup with errors found..!")
+			print("Bot::popup with errors found..!")
 			self.press_escape()
-			print("Pressing escape..!")
+			print("Bot::Pressing escape..!")
 		except TimeoutException:
 			return True
 		return False
 
 	def leave_chat(self, chat):
-		print("Leaving chat: " + chat.get_info())
+		print("Bot::Leaving chat: " + chat.get_info())
 		self.open_channel(chat.link)
 		sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 		# If the chat is valid leave it from the webpage otherwise just remove it from the list
 		if self.is_screen_clear():
-			print("Chat is valid..Continue processing..!")
+			print("Bot::Chat is valid..Continue processing..!")
 			self.open_current_channel_options()
 			sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 			if self.leave_current_channel():
@@ -475,17 +401,17 @@ class Bot:
 				if self.click_ok_popup_button():
 					sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 		# After everything runs successfully in the telegram, remove it here as well
-		print("Removing chat from the collection..!")
+		print("Bot::Removing chat from the collection..!")
 		self.chatsJoined.remove(chat)
 
 	def run_bot(self):
 		# Leave all channels which are expired
-		print("Check if there are expired chats and leave them...!")
+		print("Bot::Check if there are expired chats and leave them...!")
 		has_any_expired_channel = False
 		for chat in self.chatsJoined:
 			if chat.is_expired():
 				self.leave_chat(chat)
-				print("Chat removed successfully..!")
+				print("Bot::Chat removed successfully..!")
 				has_any_expired_channel = True
 		if has_any_expired_channel:
 			self.open_channel(BOT_LINK)
@@ -501,16 +427,36 @@ class Bot:
 		else:
 			self.message_bots()
 
-	def run(self):
-		self.driver.get("https://web.telegram.org/#/login")
+	def switch_user(self, context):
+		print("Bot::Switching to context: ", context)
+		self.refresh()
+		user, data = context
+		self.set_user(user)
+		self.storage.clear()
+		self.storage.set_json(data)
+		self.storage.get()
+		self.chatsJoined = self.chatCache.load_chats_from_last_run(self.currentUser)
+		self.reset()
+		self.refresh()
 
+	def start(self):
+		print("Bot::Starting the bot..!")
 		try:
-			self.login()
-			sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
+			# Get first user and try to log it
+			context = self.userObserver.pick_next()
+			if context == None:
+				print("Bot::Context is empty..Exiting..!")
+				return
+			self.switch_user(context)
 			runs = 0
 			# Variable to define the starting time of the program
 			start_time = timeit.default_timer()
 			while True:
+				current_time = timeit.default_timer()
+				# Every 1 hour switch to other user in order to prevent flood ban
+				if current_time - start_time >= HOUR:
+					self.switch_user(self.userObserver.pick_next())
+					start_time = timeit.default_timer()
 				try:
 					if self.is_screen_clear() == False:
 						raise Exception("Screen has some errors..!")
@@ -518,9 +464,9 @@ class Bot:
 					# TODO try and catch exception 
 					#try:
 					self.run_bot()
-					runs+=1
+					runs += 1
 					time_upto_last_run = timeit.default_timer()
-					print("Running for '", runs, "'' runs for '", (time_upto_last_run - start_time), "' seconds")
+					print("Bot::Running for '", runs, "'' runs for '", (time_upto_last_run - start_time), "' seconds")
 					# Sleep the bot every BOT_WAIT_TIME seconds for BOT_SLEEP_TIME seconds and then refresh
 					if (time_upto_last_run - start_time) >= BOT_WAIT_TIME:
 						sleep(BOT_SLEEP_TIME)
@@ -529,21 +475,28 @@ class Bot:
 					else:
 						sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 				except Exception as e:
-					print("Some critical error appeared on the screen..! Sleeping for some time and then try again untill error is not present..!")
+					print("Bot::Some critical error appeared on the screen..! Sleeping for some time and then try again untill error is not present..!")
 					print(repr(e))
 					traceback.print_exc()
-					sleep(HOUR)
-					self.refresh()
+					self.switch_user(self.userObserver.pick_next())
+					start_time = timeit.default_timer()
 				print("===========================================================")
-
+			self.userObserver.observe()
 		finally:
-			print("Closing the driver")
+			print("Bot::Closing the driver")
 			self.driver.quit()
-			self.cache_joined_channels()
+			if self.currentUser != None:
+				self.chatCache.cache_joined_channels(self.currentUser, self.chatsJoined)
 
+def prepare_driver():
+	driver = webdriver.Chrome()
+	driver.maximize_window()
+	return driver
 
+def buffer():
+	sys.stdout = Unbuffered(sys.stdout)
 
-# Unbuffer the print in order to show the data during the executing of the program
-# instead of when the program finishes
-import sys
-sys.stdout = Unbuffered(sys.stdout)
+buffer()
+driver = prepare_driver()
+print("Starting..!")
+Bot(driver, Operation.VISIT, "ZEC").start()
