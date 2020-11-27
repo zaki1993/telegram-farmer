@@ -387,6 +387,57 @@ class Bot:
 			return True
 		return False
 
+	def popup_exists(self):
+		try:
+			popup = WebDriverWait(self.driver, DRIVER_WAIT_TIME / 2).until(
+				EC.presence_of_all_elements_located((By.CLASS_NAME, "//button[@class='confirm_modal_description']"))
+			)
+		except:
+			print("Bot::Popup is not present")
+			return False
+		return True
+
+	def click_cancel_popup_button():
+		try:
+			cancel_popup_btn = WebDriverWait(self.driver, DRIVER_WAIT_TIME).until(
+				EC.presence_of_all_elements_located((By.CLASS_NAME, "//button[@class='btn btn-md']"))
+			)
+			cancel_popup_btn[0].click()
+		except:
+			print("Bot::Cancel Button is not present")
+			return False
+		print("Bot::Clicking Cancel button")
+		return True
+
+	def is_switch_to_desktop():
+		try:
+			popup = WebDriverWait(self.driver, DRIVER_WAIT_TIME / 2).until(
+				EC.presence_of_all_elements_located((By.CLASS_NAME, "//button[@class='confirm_modal_description']"))
+			)
+			return popup.text == 'Would you like to switch to desktop version?'
+		except:
+			print("Bot::Popup is not present")
+			return False
+		return False
+
+	def is_switch_to_mobile():
+		try:
+			popup = WebDriverWait(self.driver, DRIVER_WAIT_TIME / 2).until(
+				EC.presence_of_all_elements_located((By.CLASS_NAME, "//button[@class='confirm_modal_description']"))
+			)
+			return popup.text == 'Would you like to switch to mobile version?'
+		except:
+			print("Bot::Popup is not present")
+			return False
+		return False
+
+	def switch_screen(self):
+		if self.popup_exits():
+			if self.is_switch_to_desktop():
+				self.click_ok_popup_button()
+			if self.is_switch_to_mobile():
+				self.click_cancel_popup_button()
+
 	def leave_chat(self, chat):
 		print("Bot::Leaving chat: " + chat.get_info())
 		self.open_channel(chat.link)
@@ -427,7 +478,12 @@ class Bot:
 		else:
 			self.message_bots()
 
+	def cache(self):
+		if self.currentUser != None:
+			self.chatCache.cache_joined_channels(self.currentUser, self.chatsJoined)
+
 	def switch_user(self, context):
+		self.cache()
 		print("Bot::Switching to context: ", context)
 		self.refresh()
 		user, data = context
@@ -452,6 +508,7 @@ class Bot:
 			# Variable to define the starting time of the program
 			start_time = timeit.default_timer()
 			while True:
+				self.userObserver.observe()
 				current_time = timeit.default_timer()
 				# Every 1 hour switch to other user in order to prevent flood ban
 				if current_time - start_time >= HOUR:
@@ -468,12 +525,12 @@ class Bot:
 					time_upto_last_run = timeit.default_timer()
 					print("Bot::Running for '", runs, "'' runs for '", (time_upto_last_run - start_time), "' seconds")
 					# Sleep the bot every BOT_WAIT_TIME seconds for BOT_SLEEP_TIME seconds and then refresh
-					if (time_upto_last_run - start_time) >= BOT_WAIT_TIME:
-						sleep(BOT_SLEEP_TIME)
-						start_time = timeit.default_timer()
-						self.refresh()
-					else:
-						sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
+					#if (time_upto_last_run - start_time) >= BOT_WAIT_TIME:
+					#	sleep(BOT_SLEEP_TIME)
+					#	start_time = timeit.default_timer()
+					#	self.refresh()
+					#else:
+					#	sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 				except Exception as e:
 					print("Bot::Some critical error appeared on the screen..! Sleeping for some time and then try again untill error is not present..!")
 					print(repr(e))
@@ -481,12 +538,10 @@ class Bot:
 					self.switch_user(self.userObserver.pick_next())
 					start_time = timeit.default_timer()
 				print("===========================================================")
-			self.userObserver.observe()
 		finally:
 			print("Bot::Closing the driver")
 			self.driver.quit()
-			if self.currentUser != None:
-				self.chatCache.cache_joined_channels(self.currentUser, self.chatsJoined)
+			self.cache()
 
 def prepare_driver():
 	driver = webdriver.Chrome()
