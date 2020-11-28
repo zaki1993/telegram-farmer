@@ -28,6 +28,9 @@ BOT_LINK = "https://web.telegram.org/#/im?p=@Zcash_click_bot"
 # Open chat link pattern
 OPEN_CHAT_LINK_PART = "https://web.telegram.org/#/im?p=@"
 
+def current_datetime():
+	datetime.today()
+
 def sleep(ms):
 	timenow = datetime.now()
 	print("Sleeping for: ", ms, " ms. Sleep is from ", str(timenow), "to", str(timenow + timedelta(hours = ms / 1000 / 3600)))

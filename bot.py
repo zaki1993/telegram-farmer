@@ -12,6 +12,8 @@ from datetime import datetime, timedelta
 from localstorage import LocalStorage
 from operation import Operation
 from selenium import webdriver
+from logger import Logger
+from user import *
 from botutils import *
 from chat import Chat
 import traceback
@@ -19,6 +21,8 @@ import timeit
 import random
 import sys
 import re
+
+DEBUG = True
 
 class Bot:
 	def reset(self):
@@ -46,6 +50,8 @@ class Bot:
 		self.storage = LocalStorage(self.driver)
 		self.currentUser = None
 		self.chatsJoined = None
+		self.logger = Logger("log.log", "BotLogger")
+		self.balanceLogger = Logger("balance.log", "BalanceLogger")
 
 	def set_user(self, user):
 		print ("Bot::Switching to user: ", user)
@@ -438,6 +444,13 @@ class Bot:
 			if self.is_switch_to_mobile():
 				self.click_cancel_popup_button()
 
+	def get_balance(self):
+		print("Bot::getting current balance")
+		self.send_text("/balance")
+		self.sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
+		message = self.get_last_message()
+		return double(re.search('Available balance: <strong>(.+?)</strong>', message).group(1)) if message.find("Available balance") != -1 else 0.0
+
 	def leave_chat(self, chat):
 		print("Bot::Leaving chat: " + chat.get_info())
 		self.open_channel(chat.link)
@@ -456,7 +469,6 @@ class Bot:
 		self.chatsJoined.remove(chat)
 
 	def run_bot(self):
-		# Leave all channels which are expired
 		print("Bot::Check if there are expired chats and leave them...!")
 		has_any_expired_channel = False
 		for chat in self.chatsJoined:
@@ -478,31 +490,32 @@ class Bot:
 		else:
 			self.message_bots()
 
+	def cache_balance(self, newBalance):
+		totalBalanceEarned = self.currentUser.on_cache(newBalance)
+		self.balanceLogger.log("Total balance earned from user " + self.currentUser + " in this run = " + totalBalanceEarned)
+
 	def cache(self):
 		if self.currentUser != None:
-			self.chatCache.cache_joined_channels(self.currentUser, self.chatsJoined)
+			self.cache_balance(self.get_balance())
+			self.chatCache.cache_joined_channels(self.currentUser.phone, self.chatsJoined)
 
 	def switch_user(self, context):
+		phone, data = context
 		self.cache()
-		print("Bot::Switching to context: ", context)
+		print("Bot::Switching to user: ", user)
 		self.refresh()
-		user, data = context
-		self.set_user(user)
+		self.set_user(User(phone, data, self.get_balance()))
 		self.storage.clear()
-		self.storage.set_json(data)
-		self.storage.get()
-		self.chatsJoined = self.chatCache.load_chats_from_last_run(self.currentUser)
+		self.storage.set_json(user.data)
+		if DEBUG: self.storage.get()
+		self.chatsJoined = self.chatCache.load_chats_from_last_run(user.phone)
 		self.reset()
 		self.refresh()
 
 	def start(self):
 		print("Bot::Starting the bot..!")
 		try:
-			# Get first user and try to log it
 			context = self.userObserver.pick_next()
-			if context == None:
-				print("Bot::Context is empty..Exiting..!")
-				return
 			self.switch_user(context)
 			runs = 0
 			# Variable to define the starting time of the program

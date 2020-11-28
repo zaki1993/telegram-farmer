@@ -33,6 +33,6 @@ class UserCacheObserver():
 			return None
 		if self.next >= len(self.cacheArray):
 			self.next = 0
-		res = self.cacheArray[self.next]
+		context = self.cacheArray[self.next]
 		self.next += 1
-		return res
+		return context
