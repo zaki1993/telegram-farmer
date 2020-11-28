@@ -11,7 +11,7 @@ class User():
 
 
 	def on_cache(self, currentBalance):
-		return currentBalance - self.balance;
+		return '{0:.8f}'.format(currentBalance - self.balance);
 
 	@property
 	def balance(self):
@@ -24,6 +24,18 @@ class User():
 	@property
 	def data(self):
 		return self._data
+
+	@phone.setter
+	def phone(self, value):
+		self._phone = value
+
+	@data.setter
+	def data(self, value):
+		self._data = value
+
+	@balance.setter
+	def balance(self, value):
+		self._balance = value
 	
 	def __str__(self):
 		return "[" + self.phone + "]"

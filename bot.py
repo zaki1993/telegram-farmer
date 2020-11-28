@@ -24,6 +24,8 @@ import re
 
 DEBUG = True
 
+TIME_UNTIL_NEXT_USER = 600
+
 class Bot:
 	def reset(self):
 		self.waitingForTasksRetry = 0
@@ -73,7 +75,9 @@ class Bot:
 			messages = WebDriverWait(self.driver, DRIVER_WAIT_TIME).until(
 				EC.presence_of_all_elements_located((By.XPATH, "//div[@class='im_message_text']"))
 			)
-			return messages[len(messages) - 1].text
+			msg = messages[len(messages) - 1].text
+			print("Bot::" + msg)
+			return msg
 		except TimeoutException:
 			return None
 
@@ -322,43 +326,6 @@ class Bot:
 	def message_bots(self):
 		print("Bot::Messaging bots")
 
-	def wait_for_login(self):
-		WebDriverWait(self.driver, 5 * 60).until(
-			EC.text_to_be_present_in_element((By.XPATH, "//div[@class='im_history_not_selected vertical-aligned']"), "Please select a chat to start messaging")
-		)
-		print("Bot::Login successfull")
-
-	def login(self):
-		# Set phone country input field
-		phone_country = WebDriverWait(self.driver, DRIVER_WAIT_TIME).until(
-		    EC.presence_of_element_located((By.NAME, "phone_country"))
-		)
-		phone_country.clear()
-		phone_country.send_keys(self.phone.phoneCountry)
-		print("Set phone country number")
-		sleep(2000)
-
-		# Set phone number input field
-		phone_number = WebDriverWait(self.driver, DRIVER_WAIT_TIME).until(
-		    EC.presence_of_element_located((By.NAME, "phone_number"))
-		)
-		phone_number.send_keys(self.phone.phoneNumber)
-		phone_number.send_keys(Keys.ENTER)
-		print("Set phone number")
-		sleep(2000)
-
-		# Click OK confirm button
-		self.click_ok_popup_button()
-		print("Confirm the number")
-		sleep(2000)
-
-		print("Logging in as: ", self.phone.phoneCountry, self.phone.phoneNumber)
-
-		# Wait for the user to enter the SMS code and confirm the login
-		self.wait_for_login()
-		# Open ZEC click bot
-		self.refresh()
-
 	def open_current_channel_options(self):
 		all_peers_info = WebDriverWait(self.driver, DRIVER_WAIT_TIME).until(
 			EC.presence_of_all_elements_located((By.CLASS_NAME, 'tg_head_btn'))
@@ -381,14 +348,15 @@ class Bot:
 		actions.send_keys(Keys.ESCAPE)
 		actions.perform()
 
-	def is_screen_clear(self):
+	def is_screen_clear(self, clear = False):
 		try:
 			popup = WebDriverWait(self.driver, DRIVER_WAIT_TIME / 2).until(
 				EC.presence_of_all_elements_located((By.CLASS_NAME, 'error_modal_description'))
 			)
 			print("Bot::popup with errors found..!")
-			self.press_escape()
-			print("Bot::Pressing escape..!")
+			if clear:
+				self.press_escape()
+				print("Bot::Pressing escape..!")
 		except TimeoutException:
 			return True
 		return False
@@ -445,11 +413,13 @@ class Bot:
 				self.click_cancel_popup_button()
 
 	def get_balance(self):
+		if self.is_screen_clear(False) == False:
+			return -1.0
 		print("Bot::getting current balance")
 		self.send_text("/balance")
-		self.sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
+		sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 		message = self.get_last_message()
-		return double(re.search('Available balance: <strong>(.+?)</strong>', message).group(1)) if message.find("Available balance") != -1 else 0.0
+		return float(re.search('Available balance: (.+?) ZEC', message).group(1)) if message.find("Available balance") != -1 else 0.0
 
 	def leave_chat(self, chat):
 		print("Bot::Leaving chat: " + chat.get_info())
@@ -464,7 +434,6 @@ class Bot:
 				sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 				if self.click_ok_popup_button():
 					sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
-		# After everything runs successfully in the telegram, remove it here as well
 		print("Bot::Removing chat from the collection..!")
 		self.chatsJoined.remove(chat)
 
@@ -479,7 +448,6 @@ class Bot:
 		if has_any_expired_channel:
 			self.open_channel(BOT_LINK)
 			sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
-		# Process with the operation
 		if self.isOperationInitialized == False:
 			self.init_operation()
 			sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
@@ -491,32 +459,31 @@ class Bot:
 			self.message_bots()
 
 	def cache_balance(self, newBalance):
-		totalBalanceEarned = self.currentUser.on_cache(newBalance)
-		self.balanceLogger.log("Total balance earned from user " + self.currentUser + " in this run = " + totalBalanceEarned)
+		self.balanceLogger.log("Total balance earned from user " + self.currentUser.phone + " in this run = " + self.currentUser.on_cache(newBalance) + "\n")
 
 	def cache(self):
 		if self.currentUser != None:
+			print("Bot::caching user data")
 			self.cache_balance(self.get_balance())
 			self.chatCache.cache_joined_channels(self.currentUser.phone, self.chatsJoined)
 
 	def switch_user(self, context):
-		phone, data = context
 		self.cache()
-		print("Bot::Switching to user: ", user)
+		phone, data = context
 		self.refresh()
-		self.set_user(User(phone, data, self.get_balance()))
 		self.storage.clear()
-		self.storage.set_json(user.data)
+		self.storage.set_json(data)
 		if DEBUG: self.storage.get()
-		self.chatsJoined = self.chatCache.load_chats_from_last_run(user.phone)
+		self.chatsJoined = self.chatCache.load_chats_from_last_run(phone)
 		self.reset()
 		self.refresh()
+		balance = self.get_balance()
+		if balance != -1.0: self.set_user(User(phone, data, balance))
 
 	def start(self):
 		print("Bot::Starting the bot..!")
 		try:
-			context = self.userObserver.pick_next()
-			self.switch_user(context)
+			self.switch_user(self.userObserver.pick_next())
 			runs = 0
 			# Variable to define the starting time of the program
 			start_time = timeit.default_timer()
@@ -524,9 +491,11 @@ class Bot:
 				self.userObserver.observe()
 				current_time = timeit.default_timer()
 				# Every 1 hour switch to other user in order to prevent flood ban
-				if current_time - start_time >= HOUR:
+				if current_time - start_time >= TIME_UNTIL_NEXT_USER:
 					self.switch_user(self.userObserver.pick_next())
 					start_time = timeit.default_timer()
+				else:
+					print(current_time - start_time, " untill next user. Current time is", TIME_UNTIL_NEXT_USER)
 				try:
 					if self.is_screen_clear() == False:
 						raise Exception("Screen has some errors..!")
@@ -567,4 +536,4 @@ def buffer():
 buffer()
 driver = prepare_driver()
 print("Starting..!")
-Bot(driver, Operation.VISIT, "ZEC").start()
+Bot(driver, Operation.JOIN, "ZEC").start()

@@ -7,8 +7,11 @@ DRIVER_WAIT_TIME = 10
 # 1 second in milliseconds
 SECOND = 1000
 
+# 1 minute in milliseconds
+MINUTE = 60 * SECOND
+
 # 1 hour in milliseconds
-HOUR = 3600 * SECOND
+HOUR = 60 * MINUTE
 
 # Sleep time between searching from 1 component to another in milliseconds
 SLEEP_TIME_BETWEEN_COMPONENTS = 10 * SECOND
@@ -29,7 +32,7 @@ BOT_LINK = "https://web.telegram.org/#/im?p=@Zcash_click_bot"
 OPEN_CHAT_LINK_PART = "https://web.telegram.org/#/im?p=@"
 
 def current_datetime():
-	datetime.today()
+	return datetime.today().strftime("%m/%d/%Y, %H:%M:%S")
 
 def sleep(ms):
 	timenow = datetime.now()
