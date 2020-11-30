@@ -76,7 +76,6 @@ class Bot:
 				EC.presence_of_all_elements_located((By.XPATH, "//div[@class='im_message_text']"))
 			)
 			msg = messages[len(messages) - 1].text
-			print("Bot::" + msg)
 			return msg
 		except TimeoutException:
 			return None
@@ -468,7 +467,10 @@ class Bot:
 			self.chatCache.cache_joined_channels(self.currentUser.phone, self.chatsJoined)
 
 	def switch_user(self, context):
-		self.cache()
+		try:
+			self.cache()
+		except:
+			print("Exception while caching..!")
 		phone, data = context
 		self.refresh()
 		self.storage.clear()
@@ -483,7 +485,7 @@ class Bot:
 	def start(self):
 		print("Bot::Starting the bot..!")
 		try:
-			self.switch_user(self.userObserver.pick_next())
+			firstRun = True
 			runs = 0
 			# Variable to define the starting time of the program
 			start_time = timeit.default_timer()
@@ -491,9 +493,10 @@ class Bot:
 				self.userObserver.observe()
 				current_time = timeit.default_timer()
 				# Every 1 hour switch to other user in order to prevent flood ban
-				if current_time - start_time >= TIME_UNTIL_NEXT_USER:
+				if firstRun or current_time - start_time >= TIME_UNTIL_NEXT_USER:
 					self.switch_user(self.userObserver.pick_next())
 					start_time = timeit.default_timer()
+					firstRun = False
 				else:
 					print(current_time - start_time, " untill next user. Current time is", TIME_UNTIL_NEXT_USER)
 				try:
@@ -536,4 +539,4 @@ def buffer():
 buffer()
 driver = prepare_driver()
 print("Starting..!")
-Bot(driver, Operation.JOIN, "ZEC").start()
+Bot(driver, Operation.VISIT, "ZEC").start()
