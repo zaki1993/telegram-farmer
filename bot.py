@@ -16,6 +16,8 @@ from logger import Logger
 from user import *
 from botutils import *
 from chat import Chat
+from controller import Controller
+import numpy as np
 import traceback
 import timeit
 import random
@@ -45,6 +47,7 @@ class Bot:
 	def __init__(self, driver, operation, currency):
 		print("Initializing bot..!")
 		self.driver = driver
+		self.controller = Controller(driver)
 		self.operation = operation
 		self.currency = currency
 		self.userObserver = UserCacheObserver()
@@ -81,6 +84,10 @@ class Bot:
 			return None
 
 	def change_operation(self, new_operation):
+		if new_operation not in self.currentUser.allowed_operations:
+			new_operation = random_from_list(np.setdiff1d([self.operation], self.currentUser.allowed_operations))
+			if new_operation == None:
+				new_operation = Operation.VISIT
 		print("Bot::Changing operation..!")
 		self.operation = new_operation
 		self.isOperationInitialized = False
@@ -88,58 +95,20 @@ class Bot:
 		self.waitingForTasksRetry = 0
 		sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 
-	def click_ok_popup_button(self):
-		try:
-			ok_popup_btn = WebDriverWait(self.driver, DRIVER_WAIT_TIME).until(
-				EC.presence_of_element_located((By.XPATH, "//button[@class='btn btn-md btn-md-primary']"))
-			)
-			ok_popup_btn.click()
-		except:
-			print("Bot::OK Button is not present")
-			return False
-		print("Bot::Clicking OK button")
-		return True
-
-	def click(self, component_type, names, classes = "btn reply_markup_button"):
-		try:
-			buttons = WebDriverWait(self.driver, DRIVER_WAIT_TIME).until(
-				EC.presence_of_all_elements_located((By.XPATH, "//" + component_type + "[@class='" + classes + "']"))
-			)
-			print("Bot::Searching for ", names)
-			print("Bot::Total number of buttons found ", len(buttons))
-			for button in reversed(buttons):
-				text = button.text
-				print("Bot::Processing button ", button.text.encode("utf-8"))
-				for name in names:
-					if text.strip().find(name.strip()) != -1:
-						print("Bot::Clicking '",name.strip(),"' component")
-						button.click()
-						return True
-		except TimeoutException:
-			print("Bot::Component ", names, " was not found on the page in the given timeout")
-		return False
-
-	def send_text(self, text):
-		textArea = WebDriverWait(self.driver, DRIVER_WAIT_TIME).until(
-			EC.presence_of_element_located((By.XPATH, "//div[@class='composer_rich_textarea']"))
-		)
-		textArea.send_keys(text)
-		textArea.send_keys(Keys.ENTER)
-
 	def start_join_channel(self):
-		return self.send_text("/join")
+		return self.controller.send_text("/join")
 
 	def start_visit_sites(self):
-		return self.send_text("/visit")
+		return self.controller.send_text("/visit")
 
 	def start_message_bots(self):
 		return self.click_button_by_name(["Message bots"])
 
 	def click_button_by_name(self, names):
-		return self.click("button", names)
+		return self.controller.click("button", names)
 
 	def click_link_by_name(self, names):
-		return self.click("a", names)
+		return self.controller.click("a", names)
 
 	def skip_channel(self):
 		return self.click_button_by_name(["Skip"])
@@ -179,7 +148,7 @@ class Bot:
 		return result
 
 	def join_openned_channel(self):
-		return self.click("a", ["JOIN"], "btn btn-primary im_start_btn")
+		return self.controller.click("a", ["JOIN"], "btn btn-primary im_start_btn")
 
 	def open_channel(self, channel_link = BOT_LINK):
 		self.refresh(channel_link)
@@ -213,7 +182,7 @@ class Bot:
 			if self.open_joining_channel():
 				sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 				# The bot update to have a link on the chats as well
-				if self.click_ok_popup_button():
+				if self.controller.click_ok_popup_button():
 					sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 					# Get current url. It would be something like that https://t.me/Jizzax_Zomin_bozor
 					if len(self.driver.window_handles) < 2:
@@ -308,7 +277,7 @@ class Bot:
 			sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 			if self.open_site():
 				sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
-				if self.click_ok_popup_button():
+				if self.controller.click_ok_popup_button():
 					sleep(2 * SLEEP_TIME_BETWEEN_COMPONENTS - SECOND)
 					siteSleepTimeUntillReward = self.extract_sleep_time(self.get_last_message())
 					if siteSleepTimeUntillReward != 0:
@@ -334,104 +303,36 @@ class Bot:
 	def leave_current_channel(self):
 		print("Bot::Leaving current channel..!")
 		try:
-			if self.click("a", ["Leave"], 'md_modal_list_peer_action pull-right') == False:
-				self.click("a", ["Leave channel"], 'md_modal_section_link')
+			if self.controller.click("a", ["Leave"], 'md_modal_list_peer_action pull-right') == False:
+				self.controller.click("a", ["Leave channel"], 'md_modal_section_link')
 				return True
 		except:
 			print("Bot::Channel already is left")
 		return False
 
-	def press_escape(self):
-		print("Presing escape key..!")
-		actions = ActionChains(self.driver)
-		actions.send_keys(Keys.ESCAPE)
-		actions.perform()
-
-	def is_screen_clear(self, clear = False):
-		try:
-			popup = WebDriverWait(self.driver, DRIVER_WAIT_TIME / 2).until(
-				EC.presence_of_all_elements_located((By.CLASS_NAME, 'error_modal_description'))
-			)
-			print("Bot::popup with errors found..!")
-			if clear:
-				self.press_escape()
-				print("Bot::Pressing escape..!")
-		except TimeoutException:
-			return True
-		return False
-
-	def popup_exists(self):
-		try:
-			popup = WebDriverWait(self.driver, DRIVER_WAIT_TIME / 2).until(
-				EC.presence_of_all_elements_located((By.CLASS_NAME, "//button[@class='confirm_modal_description']"))
-			)
-		except:
-			print("Bot::Popup is not present")
-			return False
-		return True
-
-	def click_cancel_popup_button():
-		try:
-			cancel_popup_btn = WebDriverWait(self.driver, DRIVER_WAIT_TIME).until(
-				EC.presence_of_all_elements_located((By.CLASS_NAME, "//button[@class='btn btn-md']"))
-			)
-			cancel_popup_btn[0].click()
-		except:
-			print("Bot::Cancel Button is not present")
-			return False
-		print("Bot::Clicking Cancel button")
-		return True
-
-	def is_switch_to_desktop():
-		try:
-			popup = WebDriverWait(self.driver, DRIVER_WAIT_TIME / 2).until(
-				EC.presence_of_all_elements_located((By.CLASS_NAME, "//button[@class='confirm_modal_description']"))
-			)
-			return popup.text == 'Would you like to switch to desktop version?'
-		except:
-			print("Bot::Popup is not present")
-			return False
-		return False
-
-	def is_switch_to_mobile():
-		try:
-			popup = WebDriverWait(self.driver, DRIVER_WAIT_TIME / 2).until(
-				EC.presence_of_all_elements_located((By.CLASS_NAME, "//button[@class='confirm_modal_description']"))
-			)
-			return popup.text == 'Would you like to switch to mobile version?'
-		except:
-			print("Bot::Popup is not present")
-			return False
-		return False
-
-	def switch_screen(self):
-		if self.popup_exits():
-			if self.is_switch_to_desktop():
-				self.click_ok_popup_button()
-			if self.is_switch_to_mobile():
-				self.click_cancel_popup_button()
-
 	def get_balance(self):
-		if self.is_screen_clear(False) == False:
+		try:
+			if self.controller.is_screen_clear(False) == False:
+				return -1.0
+			print("Bot::getting current balance")
+			self.controller.send_text("/balance")
+			sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
+			message = self.get_last_message()
+			return float(re.search('Available balance: (.+?) ZEC', message).group(1)) if message.find("Available balance") != -1 else 0.0
+		except:
 			return -1.0
-		print("Bot::getting current balance")
-		self.send_text("/balance")
-		sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
-		message = self.get_last_message()
-		return float(re.search('Available balance: (.+?) ZEC', message).group(1)) if message.find("Available balance") != -1 else 0.0
-
 	def leave_chat(self, chat):
 		print("Bot::Leaving chat: " + chat.get_info())
 		self.open_channel(chat.link)
 		sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 		# If the chat is valid leave it from the webpage otherwise just remove it from the list
-		if self.is_screen_clear():
+		if self.controller.is_screen_clear():
 			print("Bot::Chat is valid..Continue processing..!")
 			self.open_current_channel_options()
 			sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 			if self.leave_current_channel():
 				sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
-				if self.click_ok_popup_button():
+				if self.controller.click_ok_popup_button():
 					sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
 		print("Bot::Removing chat from the collection..!")
 		self.chatsJoined.remove(chat)
@@ -482,47 +383,39 @@ class Bot:
 		balance = self.get_balance()
 		if balance != -1.0: self.set_user(User(phone, data, balance))
 
+	def __user_active__(self):
+		return self.currentUser != None and self.currentUser.active
+
 	def start(self):
 		print("Bot::Starting the bot..!")
 		try:
 			firstRun = True
 			runs = 0
-			# Variable to define the starting time of the program
 			start_time = timeit.default_timer()
 			while True:
 				self.userObserver.observe()
 				current_time = timeit.default_timer()
-				# Every 1 hour switch to other user in order to prevent flood ban
-				if firstRun or current_time - start_time >= TIME_UNTIL_NEXT_USER:
+				if firstRun or current_time - start_time >= TIME_UNTIL_NEXT_USER or not self.__user_active__():
 					self.switch_user(self.userObserver.pick_next())
 					start_time = timeit.default_timer()
 					firstRun = False
-				else:
-					print(current_time - start_time, " untill next user. Current time is", TIME_UNTIL_NEXT_USER)
-				try:
-					if self.is_screen_clear() == False:
-						raise Exception("Screen has some errors..!")
-					print("===========================================================")
-					# TODO try and catch exception 
-					#try:
-					self.run_bot()
-					runs += 1
-					time_upto_last_run = timeit.default_timer()
-					print("Bot::Running for '", runs, "'' runs for '", (time_upto_last_run - start_time), "' seconds")
-					# Sleep the bot every BOT_WAIT_TIME seconds for BOT_SLEEP_TIME seconds and then refresh
-					#if (time_upto_last_run - start_time) >= BOT_WAIT_TIME:
-					#	sleep(BOT_SLEEP_TIME)
-					#	start_time = timeit.default_timer()
-					#	self.refresh()
-					#else:
-					#	sleep(SLEEP_TIME_BETWEEN_COMPONENTS)
-				except Exception as e:
-					print("Bot::Some critical error appeared on the screen..! Sleeping for some time and then try again untill error is not present..!")
-					print(repr(e))
-					traceback.print_exc()
-					self.switch_user(self.userObserver.pick_next())
-					start_time = timeit.default_timer()
-				print("===========================================================")
+				if self.__user_active__():
+					if DEBUG: print(current_time - start_time, " untill next user. Current time is", TIME_UNTIL_NEXT_USER)
+					try:
+						if self.controller.is_screen_clear() == False:
+							raise Exception("Screen has some errors..!")
+						print("===========================================================")
+						self.run_bot()
+						runs += 1
+						time_upto_last_run = timeit.default_timer()
+						print("Bot::Running for '", runs, "'' runs for '", (time_upto_last_run - start_time), "' seconds")
+						print("===========================================================")
+					except Exception as e:
+						print("Bot::Some critical error appeared on the screen..! Sleeping for some time and then try again untill error is not present..!")
+						print(repr(e))
+						traceback.print_exc()
+						self.switch_user(self.userObserver.pick_next())
+						start_time = timeit.default_timer()
 		finally:
 			print("Bot::Closing the driver")
 			self.driver.quit()

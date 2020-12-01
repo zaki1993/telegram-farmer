@@ -10,7 +10,7 @@ class UserCacheObserver():
 		self.next = 0
 
 	def load(self, fileList):
-		self.cacheArray = [(self.unwrap(file), self.loadfile(CACHE_FOLDER + sep + file)) for file in fileList]
+		self.cacheArray = [(self.unwrap(file), self.__load_file__(CACHE_FOLDER + sep + file)) for file in fileList]
 
 	def observe(self):
 		print("UserCacheObserver::Observing the cache..!")
@@ -21,9 +21,9 @@ class UserCacheObserver():
 	def unwrap(self, fileName):
 		return fileName
 
-	def loadfile(self, fileName):
+	def __load_file__(self, fileName):
 		print("UserCacheObserver::Loading file: ", fileName)
-		with open(fileName, 'r') as file:
+		with open(fileName, 'r', encoding="utf8") as file:
    			return file.read()
 
 	def pick_next(self):

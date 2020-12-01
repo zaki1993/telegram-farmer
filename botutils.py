@@ -1,4 +1,5 @@
 import time
+import random
 from datetime import datetime, timedelta
 
 # Time which the driver will wait to find component untill timeout exception is raised in seconds
@@ -14,7 +15,7 @@ MINUTE = 60 * SECOND
 HOUR = 60 * MINUTE
 
 # Sleep time between searching from 1 component to another in milliseconds
-SLEEP_TIME_BETWEEN_COMPONENTS = 10 * SECOND
+SLEEP_TIME_BETWEEN_COMPONENTS = 3 * SECOND
 
 # Waiting for new message limit before switching to different operation
 RETRY_LIMIT = 2
@@ -30,6 +31,12 @@ BOT_LINK = "https://web.telegram.org/#/im?p=@Zcash_click_bot"
 
 # Open chat link pattern
 OPEN_CHAT_LINK_PART = "https://web.telegram.org/#/im?p=@"
+
+def random_from_list(l):
+	return random.choice(l)
+
+def uniquefy_list(l):
+	return list(dict.fromkeys(l))
 
 def current_datetime():
 	return datetime.today().strftime("%m/%d/%Y, %H:%M:%S")
